@@ -182,6 +182,23 @@ func (b *Broker) Open(conf *Config) error {
 		b.metricRegistry = newCleanupRegistry(conf.MetricRegistry)
 	}
 
+	// Create or reuse the global metrics shared between brokers
+	b.incomingByteRate = metrics.GetOrRegisterMeter("incoming-byte-rate", b.metricRegistry)
+	b.requestRate = metrics.GetOrRegisterMeter("request-rate", b.metricRegistry)
+	b.fetchRate = metrics.GetOrRegisterMeter("consumer-fetch-rate", b.metricRegistry)
+	b.requestSize = getOrRegisterHistogram("request-size", b.metricRegistry)
+	b.requestLatency = getOrRegisterHistogram("request-latency-in-ms", b.metricRegistry)
+	b.outgoingByteRate = metrics.GetOrRegisterMeter("outgoing-byte-rate", b.metricRegistry)
+	b.responseRate = metrics.GetOrRegisterMeter("response-rate", b.metricRegistry)
+	b.responseSize = getOrRegisterHistogram("response-size", b.metricRegistry)
+	b.requestsInFlight = metrics.GetOrRegisterCounter("requests-in-flight", b.metricRegistry)
+	b.protocolRequestsRate = map[int16]metrics.Meter{}
+	// Do not gather metrics for seeded broker (only used during bootstrap) because they share
+	// the same id (-1) and are already exposed through the global metrics above
+	if b.id >= 0 && !metrics.UseNilMetrics {
+		b.registerMetrics()
+	}
+
 	go withRecover(func() {
 		defer func() {
 			b.lock.Unlock()
@@ -214,23 +231,6 @@ func (b *Broker) Open(conf *Config) error {
 
 		b.conn = newBufConn(b.conn)
 		b.conf = conf
-
-		// Create or reuse the global metrics shared between brokers
-		b.incomingByteRate = metrics.GetOrRegisterMeter("incoming-byte-rate", b.metricRegistry)
-		b.requestRate = metrics.GetOrRegisterMeter("request-rate", b.metricRegistry)
-		b.fetchRate = metrics.GetOrRegisterMeter("consumer-fetch-rate", b.metricRegistry)
-		b.requestSize = getOrRegisterHistogram("request-size", b.metricRegistry)
-		b.requestLatency = getOrRegisterHistogram("request-latency-in-ms", b.metricRegistry)
-		b.outgoingByteRate = metrics.GetOrRegisterMeter("outgoing-byte-rate", b.metricRegistry)
-		b.responseRate = metrics.GetOrRegisterMeter("response-rate", b.metricRegistry)
-		b.responseSize = getOrRegisterHistogram("response-size", b.metricRegistry)
-		b.requestsInFlight = metrics.GetOrRegisterCounter("requests-in-flight", b.metricRegistry)
-		b.protocolRequestsRate = map[int16]metrics.Meter{}
-		// Do not gather metrics for seeded broker (only used during bootstrap) because they share
-		// the same id (-1) and are already exposed through the global metrics above
-		if b.id >= 0 && !metrics.UseNilMetrics {
-			b.registerMetrics()
-		}
 
 		if conf.Net.SASL.Mechanism == SASLTypeOAuth && conf.Net.SASL.Version == SASLHandshakeV0 {
 			conf.Net.SASL.Version = SASLHandshakeV1
